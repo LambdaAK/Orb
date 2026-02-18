@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <cmath>
+
 /**
  * @struct Vec2
  * @brief 2D vector with x and y components.
@@ -24,13 +26,31 @@ struct Vec2 {
 
     /// Add another vector to this one (in-place)
     Vec2& operator+=(const Vec2& o) { x += o.x; y += o.y; return *this; }
+    /// Subtract another vector from this one (in-place)
+    Vec2& operator-=(const Vec2& o) { x -= o.x; y -= o.y; return *this; }
     /// Add two vectors together
     Vec2 operator+(const Vec2& o) const { return Vec2(x + o.x, y + o.y); }
     /// Subtract two vectors
     Vec2 operator-(const Vec2& o) const { return Vec2(x - o.x, y - o.y); }
     /// Multiply vector by scalar
     Vec2 operator*(float s) const { return Vec2(x * s, y * s); }
+
+    /// Dot product
+    float dot(const Vec2& o) const { return x * o.x + y * o.y; }
+    /// Squared length (avoids sqrt; use for distance comparisons)
+    float lengthSq() const { return x * x + y * y; }
+    /// Length
+    float length() const { return std::sqrt(lengthSq()); }
+    /// Unit vector in same direction; returns (0,0) if length is zero
+    Vec2 normalized() const {
+        float len = length();
+        if (len <= 0.0f) return Vec2(0.0f, 0.0f);
+        return Vec2(x / len, y / len);
+    }
 };
+
+/// Dot product of two vectors
+inline float dot(const Vec2& a, const Vec2& b) { return a.dot(b); }
 
 /**
  * @struct Color

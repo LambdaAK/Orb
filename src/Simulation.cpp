@@ -13,17 +13,58 @@ namespace {
     const float MAX_DT = 1.0f / 30.0f;
     /// Speed threshold below which particles are stopped (prevents jitter)
     const float TINY_SPEED = 0.5f;
+    /// Minimum separation distance to compute collision normal (avoid div by zero)
+    const float MIN_SEPARATION = 1.0e-6f;
 }
 
 void Simulation::update(float dt) {
     // Clamp delta time to prevent huge jumps on frame drops (e.g. alt-tab)
     dt = std::min(dt, MAX_DT);
 
+    // --- 1. Integrate positions for all particles ---
     for (Particle& p : particles) {
-        // Integrate position: move particle based on velocity
         p.pos.x += p.vel.x * dt;
         p.pos.y += p.vel.y * dt;
+    }
 
+    // --- 2. Particle-particle collisions (elastic, with restitution) ---
+    const size_t n = particles.size();
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            Particle& a = particles[i];
+            Particle& b = particles[j];
+            Vec2 delta = b.pos - a.pos;
+            float dist = delta.length();
+            float sumR = a.radius + b.radius;
+
+            if (dist >= sumR) continue;  // No overlap
+
+            // Collision normal from a toward b (undefined if dist==0)
+            Vec2 n = (dist > MIN_SEPARATION) ? delta.normalized() : Vec2(1.0f, 0.0f);
+
+            // Mass proportional to area (r²) so different sizes behave correctly
+            float m1 = a.radius * a.radius;
+            float m2 = b.radius * b.radius;
+            float totalMass = m1 + m2;
+
+            // Position correction: push apart so they are exactly touching
+            float overlap = sumR - dist;
+            a.pos -= n * (overlap * (m2 / totalMass));
+            b.pos += n * (overlap * (m1 / totalMass));
+
+            // Elastic collision with restitution (1D along normal, then apply to velocity)
+            float v1n = dot(a.vel, n);
+            float v2n = dot(b.vel, n);
+            float impulse = (1.0f + restitution) * (v1n - v2n) / totalMass;
+            a.vel.x -= impulse * m2 * n.x;
+            a.vel.y -= impulse * m2 * n.y;
+            b.vel.x += impulse * m1 * n.x;
+            b.vel.y += impulse * m1 * n.y;
+        }
+    }
+
+    // --- 3. Per-particle: drag, wall collisions, tiny-speed clamp ---
+    for (Particle& p : particles) {
         // Apply velocity damping (drag) if enabled
         if (drag > 0.0f) {
             float d = 1.0f - drag * dt;
@@ -34,25 +75,21 @@ void Simulation::update(float dt) {
         float r = p.radius;
 
         // Wall collision detection and response
-        // Left wall: particle's left edge hits x=0
         if (p.pos.x - r < 0) {
-            p.pos.x = r;  // Reposition to be exactly touching wall
-            p.vel.x = std::abs(p.vel.x) * restitution;  // Bounce right with energy loss
+            p.pos.x = r;
+            p.vel.x = std::abs(p.vel.x) * restitution;
         }
-        // Right wall: particle's right edge hits worldW
         if (p.pos.x + r > worldW) {
             p.pos.x = worldW - r;
-            p.vel.x = -std::abs(p.vel.x) * restitution;  // Bounce left
+            p.vel.x = -std::abs(p.vel.x) * restitution;
         }
-        // Top wall: particle's top edge hits y=0
         if (p.pos.y - r < 0) {
             p.pos.y = r;
-            p.vel.y = std::abs(p.vel.y) * restitution;  // Bounce down
+            p.vel.y = std::abs(p.vel.y) * restitution;
         }
-        // Bottom wall: particle's bottom edge hits worldH
         if (p.pos.y + r > worldH) {
             p.pos.y = worldH - r;
-            p.vel.y = -std::abs(p.vel.y) * restitution;  // Bounce up
+            p.vel.y = -std::abs(p.vel.y) * restitution;
         }
 
         // Stop particles that are moving too slowly (prevents jitter)

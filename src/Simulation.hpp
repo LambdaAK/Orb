@@ -5,6 +5,7 @@
  * Handles all physics calculations including:
  * - Position integration (movement)
  * - Velocity damping (optional drag)
+ * - Particle-particle elastic collisions
  * - Wall collision detection and response
  */
 
