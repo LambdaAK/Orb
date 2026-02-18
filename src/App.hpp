@@ -15,7 +15,7 @@ class Renderer;
 struct Simulation;
 
 /** Placeable item types (selected from the menu) */
-enum class PlaceableType { Particle };
+enum class PlaceableType { Particle, GravityWell };
 
 /**
  * @struct App
@@ -100,4 +100,5 @@ struct App {
      * Particle gets a random bright color.
      */
     void spawnParticle(float x, float y, float vx, float vy);
+    void spawnGravityWell(float x, float y);
 };

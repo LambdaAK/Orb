@@ -13,6 +13,7 @@
 
 #include "Math.hpp"
 #include "Particle.hpp"
+#include "GravityWell.hpp"
 #include <vector>
 
 struct SDL_Window;
@@ -55,7 +56,8 @@ public:
      * @param particles Vector of particles to render
      */
     void drawParticles(const std::vector<Particle>& particles);
-    
+    void drawGravityWells(const std::vector<GravityWell>& wells);
+
     /**
      * @brief Draw a line preview for drag-to-spawn interaction.
      * @param from Start position (where mouse was pressed)

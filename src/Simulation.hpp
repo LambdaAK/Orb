@@ -13,33 +13,25 @@
 
 #include <vector>
 #include "Particle.hpp"
+#include "GravityWell.hpp"
 
 /**
  * @struct Simulation
  * @brief Manages the particle physics simulation.
  * 
- * Contains all particles and simulation parameters. The update() method
- * advances the simulation by one time step, handling movement and collisions.
+ * Contains particles, gravity wells, and simulation parameters. update() does:
+ * gravity forces, integrate, particle-particle collisions, drag, walls.
  */
 struct Simulation {
-    float worldW = 1280.0f;      ///< World width in pixels
-    float worldH = 720.0f;        ///< World height in pixels
-    float restitution = 0.9f;     ///< Bounce coefficient [0-1]: 1.0 = perfect bounce, 0.0 = no bounce
-    float drag = 0.0f;            ///< Velocity damping per second [0-1]: 0 = no drag, 1 = instant stop
+    float worldW = 1280.0f;
+    float worldH = 720.0f;
+    float restitution = 0.9f;
+    float drag = 0.0f;
 
-    std::vector<Particle> particles;  ///< All particles in the simulation
+    std::vector<Particle> particles;
+    std::vector<GravityWell> gravityWells;
 
-    /**
-     * @brief Advance simulation by one time step.
-     * @param dt Time delta in seconds (will be clamped to prevent large jumps)
-     * 
-     * Updates all particle positions, applies drag, handles wall collisions,
-     * and stops particles that are moving too slowly to prevent jitter.
-     */
     void update(float dt);
-    
-    /**
-     * @brief Remove all particles from the simulation.
-     */
     void clear();
+    void addGravityWell(float x, float y);
 };

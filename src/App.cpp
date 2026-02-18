@@ -77,7 +77,7 @@ bool App::init() {
     int mainX = 0, mainY = 0;
     SDL_GetWindowPosition(window, &mainX, &mainY);
     const int menuW = 200;
-    const int menuH = 120;
+    const int menuH = 176;  // Two slots: Particle, Gravity Well
     menuWindow = SDL_CreateWindow("Place",
                                   mainX - menuW - 20, mainY,
                                   menuW, menuH,
@@ -165,6 +165,10 @@ void App::spawnParticle(float x, float y, float vx, float vy) {
     simulation->particles.emplace_back(pos, vel, r, color);
 }
 
+void App::spawnGravityWell(float x, float y) {
+    simulation->addGravityWell(x, y);
+}
+
 void App::handleEvent(void* eventPtr) {
     SDL_Event& e = *static_cast<SDL_Event*>(eventPtr);
     Uint32 mainID = SDL_GetWindowID(window);
@@ -185,10 +189,11 @@ void App::handleEvent(void* eventPtr) {
         case SDL_MOUSEBUTTONDOWN:
             if (e.button.button != SDL_BUTTON_LEFT) break;
             if (e.button.windowID == menuID) {
-                // Click in menu: select placeable (Particle slot)
                 int mx = e.button.x, my = e.button.y;
-                if (mx >= 12 && mx < 188 && my >= 36 && my < 96)  // Particle slot rect
+                if (mx >= 12 && mx < 188 && my >= 36 && my < 96)
                     selectedPlaceable = PlaceableType::Particle;
+                else if (mx >= 12 && mx < 188 && my >= 104 && my < 164)
+                    selectedPlaceable = PlaceableType::GravityWell;
             } else if (e.button.windowID == mainID) {
                 dragActive = true;
                 dragStartX = (float)e.button.x;
@@ -203,6 +208,8 @@ void App::handleEvent(void* eventPtr) {
                 float vy = (endY - dragStartY) * velocityStrength;
                 if (selectedPlaceable == PlaceableType::Particle)
                     spawnParticle(dragStartX, dragStartY, vx, vy);
+                else if (selectedPlaceable == PlaceableType::GravityWell)
+                    spawnGravityWell(dragStartX, dragStartY);
                 dragActive = false;
             } else if (e.button.button == SDL_BUTTON_LEFT && dragActive) {
                 dragActive = false;
@@ -229,6 +236,7 @@ void App::update(float dt) {
 
 void App::render() {
     renderer->clear();
+    renderer->drawGravityWells(simulation->gravityWells);
     renderer->drawParticles(simulation->particles);
     if (dragActive) {
         int mx, my;
@@ -267,36 +275,43 @@ void App::renderMenu() {
         }
     }
 
-    // Particle slot (one placeable)
+    // Particle slot
     SDL_Rect slotRect = { 12, 36, 176, 60 };
-    bool selected = (selectedPlaceable == PlaceableType::Particle);
-    SDL_SetRenderDrawColor(menuRenderer, selected ? 70 : 50, selected ? 70 : 50, selected ? 90 : 65, 255);
+    bool particleSelected = (selectedPlaceable == PlaceableType::Particle);
+    SDL_SetRenderDrawColor(menuRenderer, particleSelected ? 70 : 50, particleSelected ? 70 : 50, particleSelected ? 90 : 65, 255);
     SDL_RenderFillRect(menuRenderer, &slotRect);
-    SDL_SetRenderDrawColor(menuRenderer, selected ? 255 : 100, selected ? 255 : 100, selected ? 255 : 120, 255);
+    SDL_SetRenderDrawColor(menuRenderer, particleSelected ? 255 : 100, particleSelected ? 255 : 100, particleSelected ? 255 : 120, 255);
     SDL_RenderDrawRect(menuRenderer, &slotRect);
-
-    // Particle icon (small circle approximated with a filled rect)
     SDL_Rect iconRect = { 12 + 20, 36 + 12, 12, 12 };
     SDL_SetRenderDrawColor(menuRenderer, 180, 180, 255, 255);
     SDL_RenderFillRect(menuRenderer, &iconRect);
-
-    // Render "Particle" label
     if (menuFont) {
-        SDL_Color labelColor = {
-            static_cast<Uint8>(selected ? 255 : 200),
-            static_cast<Uint8>(selected ? 255 : 200),
-            static_cast<Uint8>(selected ? 255 : 220),
-            255
-        };
-        SDL_Surface* labelSurf = TTF_RenderText_Solid(menuFont, "Particle", labelColor);
-        if (labelSurf) {
-            SDL_Texture* labelTex = SDL_CreateTextureFromSurface(menuRenderer, labelSurf);
-            if (labelTex) {
-                SDL_Rect labelRect = { 12 + 40, 36 + 20, labelSurf->w, labelSurf->h };
-                SDL_RenderCopy(menuRenderer, labelTex, nullptr, &labelRect);
-                SDL_DestroyTexture(labelTex);
-            }
-            SDL_FreeSurface(labelSurf);
+        SDL_Color c = { static_cast<Uint8>(particleSelected ? 255 : 200), static_cast<Uint8>(particleSelected ? 255 : 200), static_cast<Uint8>(particleSelected ? 255 : 220), 255 };
+        SDL_Surface* surf = TTF_RenderText_Solid(menuFont, "Particle", c);
+        if (surf) {
+            SDL_Texture* tex = SDL_CreateTextureFromSurface(menuRenderer, surf);
+            if (tex) { SDL_Rect r = { 12 + 40, 36 + 20, surf->w, surf->h }; SDL_RenderCopy(menuRenderer, tex, nullptr, &r); SDL_DestroyTexture(tex); }
+            SDL_FreeSurface(surf);
+        }
+    }
+
+    // Gravity Well slot
+    SDL_Rect wellSlotRect = { 12, 104, 176, 60 };
+    bool wellSelected = (selectedPlaceable == PlaceableType::GravityWell);
+    SDL_SetRenderDrawColor(menuRenderer, wellSelected ? 70 : 50, wellSelected ? 50 : 40, wellSelected ? 90 : 65, 255);
+    SDL_RenderFillRect(menuRenderer, &wellSlotRect);
+    SDL_SetRenderDrawColor(menuRenderer, wellSelected ? 255 : 100, wellSelected ? 100 : 80, wellSelected ? 255 : 120, 255);
+    SDL_RenderDrawRect(menuRenderer, &wellSlotRect);
+    SDL_Rect wellIconRect = { 12 + 20, 104 + 12, 12, 12 };
+    SDL_SetRenderDrawColor(menuRenderer, 140, 80, 200, 255);
+    SDL_RenderFillRect(menuRenderer, &wellIconRect);
+    if (menuFont) {
+        SDL_Color c = { static_cast<Uint8>(wellSelected ? 255 : 200), static_cast<Uint8>(wellSelected ? 200 : 180), static_cast<Uint8>(wellSelected ? 255 : 220), 255 };
+        SDL_Surface* surf = TTF_RenderText_Solid(menuFont, "Gravity Well", c);
+        if (surf) {
+            SDL_Texture* tex = SDL_CreateTextureFromSurface(menuRenderer, surf);
+            if (tex) { SDL_Rect r = { 12 + 40, 104 + 20, surf->w, surf->h }; SDL_RenderCopy(menuRenderer, tex, nullptr, &r); SDL_DestroyTexture(tex); }
+            SDL_FreeSurface(surf);
         }
     }
 

@@ -161,6 +161,53 @@ void Renderer::drawParticles(const std::vector<Particle>& particles) {
     }
 }
 
+void Renderer::drawGravityWells(const std::vector<GravityWell>& wells) {
+    const int SEGMENTS = 32;
+    const float drawRadius = 24.0f;  // Visual radius for the well
+    float proj[16] = {
+        2.0f / (float)width_, 0, 0, 0,
+        0, -2.0f / (float)height_, 0, 0,
+        0, 0, -1, 0,
+        -1, 1, 0, 1
+    };
+    glUseProgram(program_);
+    glUniformMatrix4fv(glGetUniformLocation(program_, "uProj"), 1, GL_FALSE, proj);
+
+    for (const GravityWell& well : wells) {
+        float verts[(SEGMENTS + 2) * 6];
+        int i = 0;
+        // Center - dark
+        verts[i++] = well.pos.x;
+        verts[i++] = well.pos.y;
+        verts[i++] = 0.15f;
+        verts[i++] = 0.08f;
+        verts[i++] = 0.25f;
+        verts[i++] = 0.9f;
+        for (int s = 0; s <= SEGMENTS; ++s) {
+            float a = (float)s / (float)SEGMENTS * 6.283185307f;
+            verts[i++] = well.pos.x + drawRadius * std::cos(a);
+            verts[i++] = well.pos.y + drawRadius * std::sin(a);
+            verts[i++] = 0.35f;
+            verts[i++] = 0.2f;
+            verts[i++] = 0.5f;
+            verts[i++] = 0.5f;  // Slightly transparent ring
+        }
+        unsigned int vao, vbo;
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), verts, GL_STREAM_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+        glDrawArrays(GL_TRIANGLE_FAN, 0, SEGMENTS + 2);
+        glDeleteBuffers(1, &vbo);
+        glDeleteVertexArrays(1, &vao);
+    }
+}
+
 void Renderer::drawCircle(const Particle& p) {
     const int SEGMENTS = 32;  // Number of segments to approximate circle
     
