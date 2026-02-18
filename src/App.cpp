@@ -34,8 +34,8 @@ float randFloat() {
  */
 Color randomBrightColor() {
     float h = randFloat();
-    float s = 0.6f + 0.4f * randFloat();  // Higher saturation for vibrant colors
-    float v = 0.9f + 0.1f * randFloat();   // Brighter values for modern glow look
+    float s = 0.7f + 0.3f * randFloat();  // Very high saturation for vibrant colors
+    float v = 0.95f + 0.05f * randFloat();   // Very bright for intense glow
     float r, g, b;
     float c = v * s;
     float x = c * (1.0f - std::fabs(std::fmod(h * 6.0f, 2.0f) - 1.0f));
@@ -236,6 +236,7 @@ void App::update(float dt) {
 
 void App::render() {
     renderer->clear();
+    renderer->drawParticleTrails(simulation->particles);
     renderer->drawGravityWells(simulation->gravityWells);
     renderer->drawParticles(simulation->particles);
     if (dragActive) {

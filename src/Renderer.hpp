@@ -56,6 +56,7 @@ public:
      * @param particles Vector of particles to render
      */
     void drawParticles(const std::vector<Particle>& particles);
+    void drawParticleTrails(const std::vector<Particle>& particles);
     void drawGravityWells(const std::vector<GravityWell>& wells);
 
     /**

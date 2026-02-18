@@ -150,7 +150,7 @@ void Renderer::resize(int width, int height) {
 }
 
 void Renderer::clear() {
-    glClearColor(0.02f, 0.02f, 0.05f, 1.0f);  // Darker background for better glow contrast
+    glClearColor(0.0f, 0.0f, 0.02f, 1.0f);  // Deep space black with slight blue tint
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -161,9 +161,67 @@ void Renderer::drawParticles(const std::vector<Particle>& particles) {
     }
 }
 
+void Renderer::drawParticleTrails(const std::vector<Particle>& particles) {
+    float proj[16] = {
+        2.0f / (float)width_, 0, 0, 0,
+        0, -2.0f / (float)height_, 0, 0,
+        0, 0, -1, 0,
+        -1, 1, 0, 1
+    };
+    glUseProgram(program_);
+    glUniformMatrix4fv(glGetUniformLocation(program_, "uProj"), 1, GL_FALSE, proj);
+    
+    for (const Particle& p : particles) {
+        if (p.trailLength < 2) continue;
+        
+        // Draw trail as connected segments with fading alpha
+        for (int i = 0; i < p.trailLength - 1; ++i) {
+            int idx1 = (p.trailIndex - p.trailLength + i + Particle::MAX_TRAIL_LENGTH) % Particle::MAX_TRAIL_LENGTH;
+            int idx2 = (p.trailIndex - p.trailLength + i + 1 + Particle::MAX_TRAIL_LENGTH) % Particle::MAX_TRAIL_LENGTH;
+            Vec2 a = p.trail[idx1];
+            Vec2 b = p.trail[idx2];
+            
+            float alpha = (float)i / (float)p.trailLength;
+            float trailWidth = 3.0f + alpha * 5.0f;  // Thicker trails
+            float r = p.color.r * (0.5f + 0.5f * alpha);
+            float g = p.color.g * (0.5f + 0.5f * alpha);
+            float bl = p.color.b * (0.5f + 0.5f * alpha);
+            
+            // Draw segment as a quad (two triangles)
+            Vec2 dir = b - a;
+            float len = dir.length();
+            if (len < 0.1f) continue;
+            Vec2 perp = Vec2(-dir.y, dir.x) * (trailWidth / len);
+            
+            float fadeAlpha = alpha * 0.7f;  // More visible trails
+            float quadVerts[6 * 6] = {
+                a.x + perp.x, a.y + perp.y, r, g, bl, fadeAlpha,
+                a.x - perp.x, a.y - perp.y, r, g, bl, fadeAlpha,
+                b.x + perp.x, b.y + perp.y, r, g, bl, fadeAlpha * 0.5f,
+                b.x + perp.x, b.y + perp.y, r, g, bl, fadeAlpha * 0.5f,
+                a.x - perp.x, a.y - perp.y, r, g, bl, fadeAlpha,
+                b.x - perp.x, b.y - perp.y, r, g, bl, fadeAlpha * 0.5f
+            };
+            
+            unsigned int vao, vbo;
+            glGenVertexArrays(1, &vao);
+            glGenBuffers(1, &vbo);
+            glBindVertexArray(vao);
+            glBindBuffer(GL_ARRAY_BUFFER, vbo);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(quadVerts), quadVerts, GL_STREAM_DRAW);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glDeleteBuffers(1, &vbo);
+            glDeleteVertexArrays(1, &vao);
+        }
+    }
+}
+
 void Renderer::drawGravityWells(const std::vector<GravityWell>& wells) {
     const int SEGMENTS = 32;
-    const float drawRadius = 24.0f;  // Visual radius for the well
     float proj[16] = {
         2.0f / (float)width_, 0, 0, 0,
         0, -2.0f / (float)height_, 0, 0,
@@ -174,30 +232,95 @@ void Renderer::drawGravityWells(const std::vector<GravityWell>& wells) {
     glUniformMatrix4fv(glGetUniformLocation(program_, "uProj"), 1, GL_FALSE, proj);
 
     for (const GravityWell& well : wells) {
-        float verts[(SEGMENTS + 2) * 6];
+        // Outer glow (large, very transparent)
+        float outerRadius = 60.0f;
+        float outerVerts[(SEGMENTS + 2) * 6];
         int i = 0;
-        // Center - dark
-        verts[i++] = well.pos.x;
-        verts[i++] = well.pos.y;
-        verts[i++] = 0.15f;
-        verts[i++] = 0.08f;
-        verts[i++] = 0.25f;
-        verts[i++] = 0.9f;
+        outerVerts[i++] = well.pos.x;
+        outerVerts[i++] = well.pos.y;
+        outerVerts[i++] = 0.2f;
+        outerVerts[i++] = 0.4f;
+        outerVerts[i++] = 1.0f;
+        outerVerts[i++] = 0.15f;
         for (int s = 0; s <= SEGMENTS; ++s) {
             float a = (float)s / (float)SEGMENTS * 6.283185307f;
-            verts[i++] = well.pos.x + drawRadius * std::cos(a);
-            verts[i++] = well.pos.y + drawRadius * std::sin(a);
-            verts[i++] = 0.35f;
-            verts[i++] = 0.2f;
-            verts[i++] = 0.5f;
-            verts[i++] = 0.5f;  // Slightly transparent ring
+            outerVerts[i++] = well.pos.x + outerRadius * std::cos(a);
+            outerVerts[i++] = well.pos.y + outerRadius * std::sin(a);
+            outerVerts[i++] = 0.2f;
+            outerVerts[i++] = 0.4f;
+            outerVerts[i++] = 1.0f;
+            outerVerts[i++] = 0.0f;
         }
         unsigned int vao, vbo;
         glGenVertexArrays(1, &vao);
         glGenBuffers(1, &vbo);
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), verts, GL_STREAM_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), outerVerts, GL_STREAM_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+        glDrawArrays(GL_TRIANGLE_FAN, 0, SEGMENTS + 2);
+        glDeleteBuffers(1, &vbo);
+        glDeleteVertexArrays(1, &vao);
+        
+        // Middle glow
+        float midRadius = 35.0f;
+        i = 0;
+        float midVerts[(SEGMENTS + 2) * 6];
+        midVerts[i++] = well.pos.x;
+        midVerts[i++] = well.pos.y;
+        midVerts[i++] = 0.3f;
+        midVerts[i++] = 0.5f;
+        midVerts[i++] = 1.0f;
+        midVerts[i++] = 0.4f;
+        for (int s = 0; s <= SEGMENTS; ++s) {
+            float a = (float)s / (float)SEGMENTS * 6.283185307f;
+            midVerts[i++] = well.pos.x + midRadius * std::cos(a);
+            midVerts[i++] = well.pos.y + midRadius * std::sin(a);
+            midVerts[i++] = 0.3f;
+            midVerts[i++] = 0.5f;
+            midVerts[i++] = 1.0f;
+            midVerts[i++] = 0.0f;
+        }
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), midVerts, GL_STREAM_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+        glDrawArrays(GL_TRIANGLE_FAN, 0, SEGMENTS + 2);
+        glDeleteBuffers(1, &vbo);
+        glDeleteVertexArrays(1, &vao);
+        
+        // Bright core
+        float coreRadius = 18.0f;
+        i = 0;
+        float coreVerts[(SEGMENTS + 2) * 6];
+        coreVerts[i++] = well.pos.x;
+        coreVerts[i++] = well.pos.y;
+        coreVerts[i++] = 0.4f;
+        coreVerts[i++] = 0.7f;
+        coreVerts[i++] = 1.0f;
+        coreVerts[i++] = 1.0f;
+        for (int s = 0; s <= SEGMENTS; ++s) {
+            float a = (float)s / (float)SEGMENTS * 6.283185307f;
+            coreVerts[i++] = well.pos.x + coreRadius * std::cos(a);
+            coreVerts[i++] = well.pos.y + coreRadius * std::sin(a);
+            coreVerts[i++] = 0.4f;
+            coreVerts[i++] = 0.7f;
+            coreVerts[i++] = 1.0f;
+            coreVerts[i++] = 0.8f;
+        }
+        glGenVertexArrays(1, &vao);
+        glGenBuffers(1, &vbo);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), coreVerts, GL_STREAM_DRAW);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
         glEnableVertexAttribArray(1);
@@ -224,8 +347,8 @@ void Renderer::drawCircle(const Particle& p) {
     glUniformMatrix4fv(projLoc, 1, GL_FALSE, proj);
 
     // --- Render outer glow (larger, semi-transparent) ---
-    float glowRadius = p.radius * 2.5f;  // Glow extends 2.5x the core radius
-    float glowAlpha = 0.3f;  // Glow transparency
+    float glowRadius = p.radius * 3.5f;  // Larger glow for more intensity
+    float glowAlpha = 0.4f;  // More visible glow
     
     float glowVerts[(SEGMENTS + 2) * 6];
     int i = 0;
@@ -266,19 +389,19 @@ void Renderer::drawCircle(const Particle& p) {
     coreVerts[i++] = p.pos.x;
     coreVerts[i++] = p.pos.y;
     // Brighten core color for more intensity
-    coreVerts[i++] = std::min(1.0f, p.color.r * 1.3f);
-    coreVerts[i++] = std::min(1.0f, p.color.g * 1.3f);
-    coreVerts[i++] = std::min(1.0f, p.color.b * 1.3f);
+    coreVerts[i++] = std::min(1.0f, p.color.r * 1.5f);
+    coreVerts[i++] = std::min(1.0f, p.color.g * 1.5f);
+    coreVerts[i++] = std::min(1.0f, p.color.b * 1.5f);
     coreVerts[i++] = 1.0f;  // Fully opaque core
     
     for (int s = 0; s <= SEGMENTS; ++s) {
         float a = (float)s / (float)SEGMENTS * 6.283185307f;
         coreVerts[i++] = p.pos.x + p.radius * std::cos(a);
         coreVerts[i++] = p.pos.y + p.radius * std::sin(a);
-        coreVerts[i++] = std::min(1.0f, p.color.r * 1.3f);
-        coreVerts[i++] = std::min(1.0f, p.color.g * 1.3f);
-        coreVerts[i++] = std::min(1.0f, p.color.b * 1.3f);
-        coreVerts[i++] = 0.8f;  // Slight fade at edge for smoothness
+        coreVerts[i++] = std::min(1.0f, p.color.r * 1.5f);
+        coreVerts[i++] = std::min(1.0f, p.color.g * 1.5f);
+        coreVerts[i++] = std::min(1.0f, p.color.b * 1.5f);
+        coreVerts[i++] = 0.9f;  // Less fade for brighter edge
     }
 
     glGenVertexArrays(1, &vao);

@@ -40,6 +40,7 @@ void Simulation::update(float dt) {
     for (Particle& p : particles) {
         p.pos.x += p.vel.x * dt;
         p.pos.y += p.vel.y * dt;
+        p.updateTrail();  // Update trail history
     }
 
     // --- 2. Particle-particle collisions (elastic, with restitution) ---
