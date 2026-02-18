@@ -132,9 +132,9 @@ bool Renderer::init(SDL_Window* window, int width, int height) {
     initShaders();
     if (!program_) return false;
 
-    // Enable alpha blending for transparency (though we use opaque colors)
+    // Enable alpha blending for glow effect
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);  // Additive blending for modern glow effect
     resize(width_, height_);
     return true;
 }
@@ -150,7 +150,7 @@ void Renderer::resize(int width, int height) {
 }
 
 void Renderer::clear() {
-    glClearColor(0.08f, 0.08f, 0.12f, 1.0f);
+    glClearColor(0.02f, 0.02f, 0.05f, 1.0f);  // Darker background for better glow contrast
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
@@ -163,59 +163,87 @@ void Renderer::drawParticles(const std::vector<Particle>& particles) {
 
 void Renderer::drawCircle(const Particle& p) {
     const int SEGMENTS = 32;  // Number of segments to approximate circle
-    float verts[(SEGMENTS + 2) * 6];  // (center + perimeter points) * (x,y,r,g,b,a)
+    
+    // Set up projection matrix once (shared for glow and core)
+    float W = (float)width_;
+    float H = (float)height_;
+    float proj[16] = {
+        2.0f/W, 0, 0, 0,
+        0, -2.0f/H, 0, 0,
+        0, 0, -1, 0,
+        -1, 1, 0, 1
+    };
+    int projLoc = glGetUniformLocation(program_, "uProj");
+    glUniformMatrix4fv(projLoc, 1, GL_FALSE, proj);
+
+    // --- Render outer glow (larger, semi-transparent) ---
+    float glowRadius = p.radius * 2.5f;  // Glow extends 2.5x the core radius
+    float glowAlpha = 0.3f;  // Glow transparency
+    
+    float glowVerts[(SEGMENTS + 2) * 6];
     int i = 0;
+    glowVerts[i++] = p.pos.x;
+    glowVerts[i++] = p.pos.y;
+    glowVerts[i++] = p.color.r;
+    glowVerts[i++] = p.color.g;
+    glowVerts[i++] = p.color.b;
+    glowVerts[i++] = glowAlpha;
     
-    // Center vertex (triangle fan center point)
-    verts[i++] = p.pos.x;
-    verts[i++] = p.pos.y;
-    verts[i++] = p.color.r;
-    verts[i++] = p.color.g;
-    verts[i++] = p.color.b;
-    verts[i++] = p.color.a;
-    
-    // Generate perimeter vertices around the circle
     for (int s = 0; s <= SEGMENTS; ++s) {
-        float a = (float)s / (float)SEGMENTS * 6.283185307f;  // Angle in radians (0 to 2π)
-        verts[i++] = p.pos.x + p.radius * std::cos(a);
-        verts[i++] = p.pos.y + p.radius * std::sin(a);
-        verts[i++] = p.color.r;
-        verts[i++] = p.color.g;
-        verts[i++] = p.color.b;
-        verts[i++] = p.color.a;
+        float a = (float)s / (float)SEGMENTS * 6.283185307f;
+        glowVerts[i++] = p.pos.x + glowRadius * std::cos(a);
+        glowVerts[i++] = p.pos.y + glowRadius * std::sin(a);
+        glowVerts[i++] = p.color.r;
+        glowVerts[i++] = p.color.g;
+        glowVerts[i++] = p.color.b;
+        glowVerts[i++] = 0.0f;  // Fade to transparent at edge
     }
 
-    // Create temporary VAO/VBO for this draw call (could be optimized with persistent buffers)
     unsigned int vao, vbo;
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
     glBindVertexArray(vao);
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), verts, GL_STREAM_DRAW);
-    
-    // Set up vertex attributes: position (location 0) and color (location 1)
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), glowVerts, GL_STREAM_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);  // x,y
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));  // r,g,b,a
-
-    // Set up orthographic projection matrix (world coords to clip space)
-    // Maps: x=[0,W] -> [-1,1], y=[0,H] -> [1,-1] (flipped Y, origin at top-left)
-    float W = (float)width_;
-    float H = (float)height_;
-    float proj[16] = {
-        2.0f/W, 0, 0, 0,
-        0, -2.0f/H, 0, 0,  // Negative Y to flip coordinate system
-        0, 0, -1, 0,
-        -1, 1, 0, 1
-    };
-    int loc = glGetUniformLocation(program_, "uProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, proj);
-
-    // Draw circle as triangle fan (center + perimeter points)
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
     glDrawArrays(GL_TRIANGLE_FAN, 0, SEGMENTS + 2);
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
 
-    // Clean up temporary buffers
+    // --- Render bright core (smaller, fully opaque) ---
+    float coreVerts[(SEGMENTS + 2) * 6];
+    i = 0;
+    coreVerts[i++] = p.pos.x;
+    coreVerts[i++] = p.pos.y;
+    // Brighten core color for more intensity
+    coreVerts[i++] = std::min(1.0f, p.color.r * 1.3f);
+    coreVerts[i++] = std::min(1.0f, p.color.g * 1.3f);
+    coreVerts[i++] = std::min(1.0f, p.color.b * 1.3f);
+    coreVerts[i++] = 1.0f;  // Fully opaque core
+    
+    for (int s = 0; s <= SEGMENTS; ++s) {
+        float a = (float)s / (float)SEGMENTS * 6.283185307f;
+        coreVerts[i++] = p.pos.x + p.radius * std::cos(a);
+        coreVerts[i++] = p.pos.y + p.radius * std::sin(a);
+        coreVerts[i++] = std::min(1.0f, p.color.r * 1.3f);
+        coreVerts[i++] = std::min(1.0f, p.color.g * 1.3f);
+        coreVerts[i++] = std::min(1.0f, p.color.b * 1.3f);
+        coreVerts[i++] = 0.8f;  // Slight fade at edge for smoothness
+    }
+
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(sizeof(float) * i), coreVerts, GL_STREAM_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+    glDrawArrays(GL_TRIANGLE_FAN, 0, SEGMENTS + 2);
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
 }

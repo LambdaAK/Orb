@@ -38,7 +38,7 @@ struct App {
     float dragStartX = 0.0f;            ///< Mouse X position when drag started
     float dragStartY = 0.0f;           ///< Mouse Y position when drag started
     float velocityStrength = 6.0f;     ///< Multiplier for drag-to-velocity conversion
-    float particleRadius = 6.0f;        ///< Default radius for spawned particles
+    float particleRadius = 3.5f;        ///< Default radius for spawned particles (smaller, modern look)
 
     /**
      * @brief Initialize SDL, create window, set up renderer and simulation.

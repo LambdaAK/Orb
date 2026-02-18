@@ -33,8 +33,8 @@ float randFloat() {
  */
 Color randomBrightColor() {
     float h = randFloat();
-    float s = 0.2f + 0.8f * randFloat();
-    float v = 0.85f + 0.15f * randFloat();
+    float s = 0.6f + 0.4f * randFloat();  // Higher saturation for vibrant colors
+    float v = 0.9f + 0.1f * randFloat();   // Brighter values for modern glow look
     float r, g, b;
     float c = v * s;
     float x = c * (1.0f - std::fabs(std::fmod(h * 6.0f, 2.0f) - 1.0f));
