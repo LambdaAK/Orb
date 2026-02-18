@@ -9,8 +9,13 @@
 #pragma once
 
 struct SDL_Window;
+struct SDL_Renderer;
+struct TTF_Font;
 class Renderer;
 struct Simulation;
+
+/** Placeable item types (selected from the menu) */
+enum class PlaceableType { Particle };
 
 /**
  * @struct App
@@ -23,12 +28,17 @@ struct Simulation;
  * - Coordination between renderer and simulation
  */
 struct App {
-    SDL_Window* window = nullptr;        ///< SDL window handle
+    SDL_Window* window = nullptr;        ///< Main sandbox window
+    SDL_Window* menuWindow = nullptr;    ///< Place/tools menu window
+    SDL_Renderer* menuRenderer = nullptr;///< 2D renderer for menu (no OpenGL)
+    TTF_Font* menuFont = nullptr;        ///< Font for menu labels
     Renderer* renderer = nullptr;       ///< OpenGL renderer instance
     Simulation* simulation = nullptr;   ///< Physics simulation instance
 
-    int width = 1280;                   ///< Window width in pixels
-    int height = 720;                   ///< Window height in pixels
+    int width = 1280;                   ///< Main window width in pixels
+    int height = 720;                   ///< Main window height in pixels
+
+    PlaceableType selectedPlaceable = PlaceableType::Particle;  ///< Current tool from menu
 
     bool running = true;                ///< Main loop flag (false = exit)
     bool paused = false;                ///< Simulation pause state
@@ -73,9 +83,11 @@ struct App {
     void update(float dt);
     
     /**
-     * @brief Render one frame: clear, draw particles, draw drag preview if active.
+     * @brief Render one frame: main window (particles, drag preview) and menu window.
      */
     void render();
+    /** @brief Draw the place/tools menu in the menu window */
+    void renderMenu();
     
     /**
      * @brief Spawn a new particle at the given position with given velocity.

@@ -9,6 +9,7 @@
 #include "Math.hpp"
 #include "Particle.hpp"
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
 #include <cstdlib>
 #include <cmath>
 #include <cstdio>
@@ -56,9 +57,13 @@ bool App::init() {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
+    if (TTF_Init() != 0) {
+        std::fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
+        return false;
+    }
     std::srand(12345);  // Fixed seed for deterministic random colors
 
-    // Create window with OpenGL support
+    // Create main window with OpenGL support
     window = SDL_CreateWindow("Particle Sandbox",
                               SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                               width, height,
@@ -68,7 +73,42 @@ bool App::init() {
         return false;
     }
 
-    // Initialize OpenGL renderer
+    // Create menu window (to the left of main window)
+    int mainX = 0, mainY = 0;
+    SDL_GetWindowPosition(window, &mainX, &mainY);
+    const int menuW = 200;
+    const int menuH = 120;
+    menuWindow = SDL_CreateWindow("Place",
+                                  mainX - menuW - 20, mainY,
+                                  menuW, menuH,
+                                  SDL_WINDOW_SHOWN);
+    if (!menuWindow) {
+        std::fprintf(stderr, "SDL_CreateWindow (menu) failed: %s\n", SDL_GetError());
+        return false;
+    }
+    menuRenderer = SDL_CreateRenderer(menuWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!menuRenderer) {
+        std::fprintf(stderr, "SDL_CreateRenderer (menu) failed: %s\n", SDL_GetError());
+        return false;
+    }
+
+    // Load font for menu labels (try system fonts on macOS)
+    #ifdef __APPLE__
+    menuFont = TTF_OpenFont("/System/Library/Fonts/Helvetica.ttc", 16);
+    if (!menuFont) {
+        menuFont = TTF_OpenFont("/Library/Fonts/Arial.ttf", 16);
+    }
+    #else
+    menuFont = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16);
+    if (!menuFont) {
+        menuFont = TTF_OpenFont("/usr/share/fonts/TTF/DejaVuSans.ttf", 16);
+    }
+    #endif
+    if (!menuFont) {
+        std::fprintf(stderr, "Warning: Could not load font, labels will not render: %s\n", TTF_GetError());
+    }
+
+    // Initialize OpenGL renderer for main window
     renderer = new Renderer();
     if (!renderer->init(window, width, height)) {
         delete renderer;
@@ -89,10 +129,23 @@ void App::shutdown() {
     simulation = nullptr;
     delete renderer;
     renderer = nullptr;
+    if (menuFont) {
+        TTF_CloseFont(menuFont);
+        menuFont = nullptr;
+    }
+    if (menuRenderer) {
+        SDL_DestroyRenderer(menuRenderer);
+        menuRenderer = nullptr;
+    }
+    if (menuWindow) {
+        SDL_DestroyWindow(menuWindow);
+        menuWindow = nullptr;
+    }
     if (window) {
         SDL_DestroyWindow(window);
         window = nullptr;
     }
+    TTF_Quit();
     SDL_Quit();
 }
 
@@ -114,42 +167,49 @@ void App::spawnParticle(float x, float y, float vx, float vy) {
 
 void App::handleEvent(void* eventPtr) {
     SDL_Event& e = *static_cast<SDL_Event*>(eventPtr);
+    Uint32 mainID = SDL_GetWindowID(window);
+    Uint32 menuID = menuWindow ? SDL_GetWindowID(menuWindow) : 0;
+
     switch (e.type) {
         case SDL_QUIT:
-            // Window close button clicked
             running = false;
             break;
         case SDL_KEYDOWN:
             if (e.key.keysym.sym == SDLK_ESCAPE)
-                running = false;  // Exit on Esc
+                running = false;
             else if (e.key.keysym.sym == SDLK_r)
-                simulation->clear();  // Clear all particles
+                simulation->clear();
             else if (e.key.keysym.sym == SDLK_SPACE)
-                paused = !paused;  // Toggle pause
+                paused = !paused;
             break;
         case SDL_MOUSEBUTTONDOWN:
-            // Start drag: record mouse position
-            if (e.button.button == SDL_BUTTON_LEFT) {
+            if (e.button.button != SDL_BUTTON_LEFT) break;
+            if (e.button.windowID == menuID) {
+                // Click in menu: select placeable (Particle slot)
+                int mx = e.button.x, my = e.button.y;
+                if (mx >= 12 && mx < 188 && my >= 36 && my < 96)  // Particle slot rect
+                    selectedPlaceable = PlaceableType::Particle;
+            } else if (e.button.windowID == mainID) {
                 dragActive = true;
                 dragStartX = (float)e.button.x;
                 dragStartY = (float)e.button.y;
             }
             break;
         case SDL_MOUSEBUTTONUP:
-            // End drag: spawn particle with velocity based on drag distance
-            if (e.button.button == SDL_BUTTON_LEFT && dragActive) {
+            if (e.button.button == SDL_BUTTON_LEFT && dragActive && e.button.windowID == mainID) {
                 float endX = (float)e.button.x;
                 float endY = (float)e.button.y;
-                // Velocity = drag vector * strength multiplier
                 float vx = (endX - dragStartX) * velocityStrength;
                 float vy = (endY - dragStartY) * velocityStrength;
-                spawnParticle(dragStartX, dragStartY, vx, vy);
+                if (selectedPlaceable == PlaceableType::Particle)
+                    spawnParticle(dragStartX, dragStartY, vx, vy);
+                dragActive = false;
+            } else if (e.button.button == SDL_BUTTON_LEFT && dragActive) {
                 dragActive = false;
             }
             break;
         case SDL_WINDOWEVENT:
-            // Handle window resize: update world bounds and viewport
-            if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
+            if (e.window.windowID == mainID && e.window.event == SDL_WINDOWEVENT_RESIZED) {
                 width = e.window.data1;
                 height = e.window.data2;
                 simulation->worldW = (float)width;
@@ -176,6 +236,71 @@ void App::render() {
         renderer->drawDragPreview(Vec2(dragStartX, dragStartY), Vec2((float)mx, (float)my));
     }
     SDL_GL_SwapWindow(window);
+
+    renderMenu();
+}
+
+void App::renderMenu() {
+    if (!menuRenderer) return;
+    const int menuW = 200;
+
+    SDL_SetRenderDrawColor(menuRenderer, 28, 28, 36, 255);
+    SDL_RenderClear(menuRenderer);
+
+    // Title bar
+    SDL_Rect titleRect = { 0, 0, menuW, 28 };
+    SDL_SetRenderDrawColor(menuRenderer, 45, 45, 58, 255);
+    SDL_RenderFillRect(menuRenderer, &titleRect);
+
+    // Render "Place" title text
+    if (menuFont) {
+        SDL_Color white = { 255, 255, 255, 255 };
+        SDL_Surface* textSurf = TTF_RenderText_Solid(menuFont, "Place", white);
+        if (textSurf) {
+            SDL_Texture* textTex = SDL_CreateTextureFromSurface(menuRenderer, textSurf);
+            if (textTex) {
+                SDL_Rect textRect = { 8, 6, textSurf->w, textSurf->h };
+                SDL_RenderCopy(menuRenderer, textTex, nullptr, &textRect);
+                SDL_DestroyTexture(textTex);
+            }
+            SDL_FreeSurface(textSurf);
+        }
+    }
+
+    // Particle slot (one placeable)
+    SDL_Rect slotRect = { 12, 36, 176, 60 };
+    bool selected = (selectedPlaceable == PlaceableType::Particle);
+    SDL_SetRenderDrawColor(menuRenderer, selected ? 70 : 50, selected ? 70 : 50, selected ? 90 : 65, 255);
+    SDL_RenderFillRect(menuRenderer, &slotRect);
+    SDL_SetRenderDrawColor(menuRenderer, selected ? 255 : 100, selected ? 255 : 100, selected ? 255 : 120, 255);
+    SDL_RenderDrawRect(menuRenderer, &slotRect);
+
+    // Particle icon (small circle approximated with a filled rect)
+    SDL_Rect iconRect = { 12 + 20, 36 + 12, 12, 12 };
+    SDL_SetRenderDrawColor(menuRenderer, 180, 180, 255, 255);
+    SDL_RenderFillRect(menuRenderer, &iconRect);
+
+    // Render "Particle" label
+    if (menuFont) {
+        SDL_Color labelColor = {
+            static_cast<Uint8>(selected ? 255 : 200),
+            static_cast<Uint8>(selected ? 255 : 200),
+            static_cast<Uint8>(selected ? 255 : 220),
+            255
+        };
+        SDL_Surface* labelSurf = TTF_RenderText_Solid(menuFont, "Particle", labelColor);
+        if (labelSurf) {
+            SDL_Texture* labelTex = SDL_CreateTextureFromSurface(menuRenderer, labelSurf);
+            if (labelTex) {
+                SDL_Rect labelRect = { 12 + 40, 36 + 20, labelSurf->w, labelSurf->h };
+                SDL_RenderCopy(menuRenderer, labelTex, nullptr, &labelRect);
+                SDL_DestroyTexture(labelTex);
+            }
+            SDL_FreeSurface(labelSurf);
+        }
+    }
+
+    SDL_RenderPresent(menuRenderer);
 }
 
 void App::run() {
