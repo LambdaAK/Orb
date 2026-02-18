@@ -1,0 +1,12 @@
+# Build output
+particle_sandbox
+build/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
