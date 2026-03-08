@@ -10,6 +10,7 @@
 #include "Particle.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+#include <algorithm>
 #include <cstdlib>
 #include <cmath>
 #include <cstdio>
@@ -49,6 +50,29 @@ Color randomBrightColor() {
     return Color(r + m, g + m, b + m, 1.0f);
 }
 
+// Time slider in menu: track and thumb, log scale 0.1x .. 10x
+const int SLIDER_TRACK_X = 12;
+const int SLIDER_TRACK_Y = 172;
+const int SLIDER_TRACK_W = 176;
+const int SLIDER_TRACK_H = 10;
+const int SLIDER_THUMB_W = 12;
+const int SLIDER_THUMB_H = 14;
+const float TIME_MIN = 0.1f;
+const float TIME_MAX = 10.0f;
+
+float timeScaleFromSliderX(int mx) {
+    float n = (float)(mx - SLIDER_TRACK_X) / (float)SLIDER_TRACK_W;
+    if (n < 0.0f) n = 0.0f;
+    if (n > 1.0f) n = 1.0f;
+    float t = n * 2.0f - 1.0f;  // [-1, 1] for log10
+    return std::pow(10.0f, t);
+}
+int sliderXFromTimeScale(float ts) {
+    float t = std::log10(std::max(TIME_MIN, std::min(TIME_MAX, ts)));
+    float n = (t - std::log10(TIME_MIN)) / (std::log10(TIME_MAX) - std::log10(TIME_MIN));
+    return SLIDER_TRACK_X + (int)(n * (float)(SLIDER_TRACK_W - SLIDER_THUMB_W)) + SLIDER_THUMB_W / 2;
+}
+
 } // namespace
 
 bool App::init() {
@@ -77,7 +101,7 @@ bool App::init() {
     int mainX = 0, mainY = 0;
     SDL_GetWindowPosition(window, &mainX, &mainY);
     const int menuW = 200;
-    const int menuH = 176;  // Two slots: Particle, Gravity Well
+    const int menuH = 200;  // Two slots + time scale row
     menuWindow = SDL_CreateWindow("Place",
                                   mainX - menuW - 20, mainY,
                                   menuW, menuH,
@@ -185,6 +209,11 @@ void App::handleEvent(void* eventPtr) {
                 simulation->clear();
             else if (e.key.keysym.sym == SDLK_SPACE)
                 paused = !paused;
+            else if (e.key.keysym.sym == SDLK_LEFTBRACKET) {
+                timeScale = std::max(0.1f, timeScale / 1.5f);
+            } else if (e.key.keysym.sym == SDLK_RIGHTBRACKET) {
+                timeScale = std::min(10.0f, timeScale * 1.5f);
+            }
             break;
         case SDL_MOUSEBUTTONDOWN:
             if (e.button.button != SDL_BUTTON_LEFT) break;
@@ -194,6 +223,11 @@ void App::handleEvent(void* eventPtr) {
                     selectedPlaceable = PlaceableType::Particle;
                 else if (mx >= 12 && mx < 188 && my >= 104 && my < 164)
                     selectedPlaceable = PlaceableType::GravityWell;
+                else if (mx >= SLIDER_TRACK_X && mx < SLIDER_TRACK_X + SLIDER_TRACK_W &&
+                         my >= SLIDER_TRACK_Y && my < SLIDER_TRACK_Y + SLIDER_TRACK_H) {
+                    timeScaleSliderActive = true;
+                    timeScale = std::max(TIME_MIN, std::min(TIME_MAX, timeScaleFromSliderX(mx)));
+                }
             } else if (e.button.windowID == mainID) {
                 dragActive = true;
                 dragStartX = (float)e.button.x;
@@ -211,8 +245,19 @@ void App::handleEvent(void* eventPtr) {
                 else if (selectedPlaceable == PlaceableType::GravityWell)
                     spawnGravityWell(dragStartX, dragStartY);
                 dragActive = false;
-            } else if (e.button.button == SDL_BUTTON_LEFT && dragActive) {
-                dragActive = false;
+            } else if (e.button.button == SDL_BUTTON_LEFT) {
+                if (dragActive) dragActive = false;
+                if (timeScaleSliderActive) timeScaleSliderActive = false;
+            }
+            break;
+        case SDL_MOUSEMOTION:
+            if (timeScaleSliderActive && menuWindow) {
+                int gx, gy;
+                SDL_GetMouseState(&gx, &gy);
+                int wx, wy;
+                SDL_GetWindowPosition(menuWindow, &wx, &wy);
+                int mx = gx - wx;
+                timeScale = std::max(TIME_MIN, std::min(TIME_MAX, timeScaleFromSliderX(mx)));
             }
             break;
         case SDL_WINDOWEVENT:
@@ -231,7 +276,7 @@ void App::handleEvent(void* eventPtr) {
 
 void App::update(float dt) {
     if (!paused)
-        simulation->update(dt);
+        simulation->update(dt * timeScale);
 }
 
 void App::render() {
@@ -315,6 +360,37 @@ void App::renderMenu() {
             SDL_FreeSurface(surf);
         }
     }
+
+    // Time scale: label + slider
+    if (menuFont) {
+        char timeBuf[24];
+        std::snprintf(timeBuf, sizeof(timeBuf), "Time %.2gx", (double)timeScale);
+        SDL_Color dim = { 160, 160, 180, 255 };
+        SDL_Surface* surf = TTF_RenderText_Solid(menuFont, timeBuf, dim);
+        if (surf) {
+            SDL_Texture* tex = SDL_CreateTextureFromSurface(menuRenderer, surf);
+            if (tex) {
+                SDL_Rect r = { 12, 158, surf->w, surf->h };
+                SDL_RenderCopy(menuRenderer, tex, nullptr, &r);
+                SDL_DestroyTexture(tex);
+            }
+            SDL_FreeSurface(surf);
+        }
+    }
+    // Slider track
+    SDL_Rect trackRect = { SLIDER_TRACK_X, SLIDER_TRACK_Y, SLIDER_TRACK_W, SLIDER_TRACK_H };
+    SDL_SetRenderDrawColor(menuRenderer, 50, 50, 65, 255);
+    SDL_RenderFillRect(menuRenderer, &trackRect);
+    SDL_SetRenderDrawColor(menuRenderer, 90, 90, 110, 255);
+    SDL_RenderDrawRect(menuRenderer, &trackRect);
+    // Slider thumb
+    int thumbX = sliderXFromTimeScale(timeScale) - SLIDER_THUMB_W / 2;
+    int thumbY = SLIDER_TRACK_Y - (SLIDER_THUMB_H - SLIDER_TRACK_H) / 2;
+    SDL_Rect thumbRect = { thumbX, thumbY, SLIDER_THUMB_W, SLIDER_THUMB_H };
+    SDL_SetRenderDrawColor(menuRenderer, timeScaleSliderActive ? 120 : 100, 100, 180, 255);
+    SDL_RenderFillRect(menuRenderer, &thumbRect);
+    SDL_SetRenderDrawColor(menuRenderer, 160, 160, 220, 255);
+    SDL_RenderDrawRect(menuRenderer, &thumbRect);
 
     SDL_RenderPresent(menuRenderer);
 }

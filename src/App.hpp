@@ -42,6 +42,8 @@ struct App {
 
     bool running = true;                ///< Main loop flag (false = exit)
     bool paused = false;                ///< Simulation pause state
+    float timeScale = 1.0f;             ///< Simulation speed (1 = real time, 2 = 2x, 0.5 = half)
+    bool timeScaleSliderActive = false; ///< True while dragging the time slider in the menu
 
     // Click-drag spawn state
     bool dragActive = false;            ///< True while user is dragging to spawn
